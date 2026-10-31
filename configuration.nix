@@ -87,7 +87,7 @@ in
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.sudo ];
+    path = [ "/run/wrappers" "/run/current-system/sw" ];
     environment = {
       MAELLE_LISTEN = "127.0.0.1:8080";
       MAELLE_PERSONA = "/etc/nixos/maelle-proxy/persona.md";
