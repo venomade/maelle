@@ -6,6 +6,9 @@ let
     version = "0.2.0";
     src = ./maelle-proxy;
     vendorHash = null;
+    postInstall = ''
+      mv $out/bin/proxy $out/bin/maelle-proxy
+    '';
   };
 in
 {
