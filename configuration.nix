@@ -47,6 +47,7 @@ in
     extraGroups = [ "wheel" ];
     openssh.authorizedKeys.keys = [ "@SSH_PUB@" ];
   };
+  users.groups.maelle = { };
   security.sudo.wheelNeedsPassword = false;
 
   # Nginx
