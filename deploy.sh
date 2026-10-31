@@ -5,14 +5,17 @@
 #   ./deploy.sh [user@host]           # default: maelle@maelle.sh
 #
 # What it does:
-#   1. uploads configuration.nix, proxy/ and site/ to a staging dir on the server
-#   2. first run only: asks for MISTRAL_API_KEY + MAELLE_PROXY_KEY and installs
-#      them into /etc/maelle.env (root-only, never in this repo)
-#   3. installs the files into /etc/nixos — the source of truth on the box
-#   4. sudo nixos-rebuild switch — Nix builds the Go proxy, then starts
-#      maelle-proxy + nginx; both are enabled, so they come back on every
-#      reboot from here on
-#   5. smoke-checks https://maelle.sh and https://api.maelle.sh
+#   1. uploads proxy/ and site/ to a staging dir on the server, plus the
+#      configuration template with the machine values (GRUB device, EFI
+#      flags, SSH key) substituted in — values read from the live config,
+#      never overwriting it with raw @PLACEHOLDER@s
+#   2. on first run (or while /etc/maelle.env still holds the install
+#      placeholder): asks for MISTRAL_API_KEY + MAELLE_PROXY_KEY and
+#      installs them root-only (never in this repo)
+#   3. nixos-rebuild switch FROM THE STAGING DIR — /etc/nixos only adopts
+#      the new files after the build has succeeded, so a failed build
+#      leaves the previous configuration fully intact
+#   4. smoke-checks https://maelle.sh and https://api.maelle.sh
 #
 # Requires: passwordless sudo for the ssh user (the install config grants it
 # to maelle) and DNS for maelle.sh + api.maelle.sh pointing at the server.
@@ -41,7 +44,39 @@ fi
 
 log "Uploading files to $HOST"
 ssh "$HOST" "rm -rf '$STAGE' && mkdir -p '$STAGE'"
-tar czf - -C "$REPO_ROOT" configuration.nix proxy site | ssh "$HOST" "tar xzf - -C '$STAGE'"
+tar czf - -C "$REPO_ROOT" proxy site | ssh "$HOST" "tar xzf - -C '$STAGE'"
+
+log "Reading machine-specific values from the live config"
+# configuration.nix in the repo is a TEMPLATE (@GRUB_DEVICE@ and friends are
+# substituted by install.sh at install time). The substituted values live
+# only on the server — so read them from the live config and rebuild the
+# substituted file, never clobber it with the raw template.
+CURRENT="$(ssh "$HOST" "sudo cat /etc/nixos/configuration.nix")" \
+  || die "cannot read /etc/nixos/configuration.nix on the server"
+GRUB_DEVICE="$(grep -m1 'device = ' <<<"$CURRENT" | sed -E 's/.*= *"([^"]*)".*/\1/')"
+EFI_SUPPORT="$(grep -m1 'efiSupport = ' <<<"$CURRENT" | sed -E 's/.*= *([^;]*);.*/\1/')"
+EFI_CAN_TOUCH="$(grep -m1 'canTouchEfiVariables = ' <<<"$CURRENT" | sed -E 's/.*= *([^;]*);.*/\1/')"
+SSH_PUB="$(grep -m1 'authorizedKeys.keys = ' <<<"$CURRENT" | sed -E 's/.*\[ *"(.*)".*/\1/')"
+[[ "$GRUB_DEVICE" =~ ^/dev/ || "$GRUB_DEVICE" == "nodev" ]] || die "no GRUB device in the live config — repair /etc/nixos/configuration.nix first"
+[[ "$EFI_SUPPORT" == true || "$EFI_SUPPORT" == false ]] || die "no efiSupport value in the live config"
+[[ "$EFI_CAN_TOUCH" == true || "$EFI_CAN_TOUCH" == false ]] || die "no canTouchEfiVariables value in the live config"
+[[ "$SSH_PUB" =~ ^(ssh|ecdsa|sk)- ]] || die "no SSH key in the live config"
+
+log "Substituting machine values into the config template"
+CONFIG="$(<configuration.nix)"
+CONFIG="${CONFIG//@SSH_PUB@/$SSH_PUB}"
+CONFIG="${CONFIG//@GRUB_DEVICE@/$GRUB_DEVICE}"
+CONFIG="${CONFIG//@EFI_SUPPORT@/$EFI_SUPPORT}"
+CONFIG="${CONFIG//@EFI_CAN_TOUCH@/$EFI_CAN_TOUCH}"
+if [[ "$CONFIG" =~ @[A-Z_]+@ ]]; then
+  die "unsubstituted placeholder: ${BASH_REMATCH[0]} — stale template?"
+fi
+printf '%s\n' "$CONFIG" | ssh "$HOST" "cat > '$STAGE'/configuration.nix"
+
+# hardware-configuration.nix (real disk UUIDs) is generated per-machine at
+# install time and never in the repo — bring it into the staging dir so the
+# config can be evaluated there.
+ssh "$HOST" "sudo cp /etc/nixos/hardware-configuration.nix '$STAGE/'"
 
 log "Checking secrets (/etc/maelle.env)"
 # Prompt only when the file is missing/empty or still holds the install
@@ -57,7 +92,12 @@ MAELLE_PROXY_KEY=$MAELLE_PROXY_KEY
 EOF
 fi
 
-log "Installing files into /etc/nixos"
+log "nixos-rebuild switch on $HOST from the staging dir (first run builds the Go proxy — takes a while)"
+# Switch BEFORE touching /etc/nixos: if this fails, the server keeps its
+# previous configuration untouched — exactly what the error message claims.
+ssh "$HOST" "sudo nixos-rebuild switch -I nixos-config='$STAGE'/configuration.nix"
+
+log "Build succeeded — installing files into /etc/nixos"
 ssh "$HOST" "
   sudo install -m 644 '$STAGE'/configuration.nix /etc/nixos/configuration.nix &&
   sudo rm -rf /etc/nixos/maelle-proxy /etc/nixos/maelle-site &&
@@ -66,9 +106,6 @@ ssh "$HOST" "
   sudo chmod -R a+rX /etc/nixos/maelle-proxy /etc/nixos/maelle-site &&
   rm -rf '$STAGE'
 "
-
-log "nixos-rebuild switch on $HOST (first run builds the Go proxy — takes a while)"
-ssh "$HOST" "sudo nixos-rebuild switch"
 
 log "Smoke checks"
 sleep 5    # give nginx/ACME a moment on the very first deploy
