@@ -1,0 +1,45 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "maelle_read_file",
+      "description": "Read a text file from Maelle's server. This tool runs on the agent's machine, not the user's. Pass an absolute path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Absolute path of the file on Maelle's server" }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "maelle_list_dir",
+      "description": "List the entries of a directory on Maelle's server. This tool runs on the agent's machine, not the user's.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Absolute path of the directory on Maelle's server" }
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "maelle_run_command",
+      "description": "Run a shell command on Maelle's server (with full sudo access). Use this for anything read_file/list_dir cannot do. Returns the exit code plus combined stdout/stderr. Commands time out after 60 seconds unless timeout_seconds says otherwise.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "The shell command to run" },
+          "timeout_seconds": { "type": "number", "description": "Optional timeout, 1-300 seconds (default 60)" }
+        },
+        "required": ["command"]
+      }
+    }
+  }
+]
