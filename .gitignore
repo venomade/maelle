@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# locally built binaries
+/cli/cli
+/proxy/proxy
+
 # Test binary, built with `go test -c`
 *.test
 
