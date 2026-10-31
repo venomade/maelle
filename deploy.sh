@@ -44,7 +44,11 @@ fi
 
 log "Uploading files to $HOST"
 ssh "$HOST" "rm -rf '$STAGE' && mkdir -p '$STAGE'"
-tar czf - -C "$REPO_ROOT" proxy site | ssh "$HOST" "tar xzf - -C '$STAGE'"
+tar czf - -C "$REPO_ROOT" proxy site | ssh "$HOST" "
+  tar xzf - -C '$STAGE' &&
+  mv '$STAGE'/proxy '$STAGE'/maelle-proxy &&
+  mv '$STAGE'/site '$STAGE'/maelle-site
+"
 
 log "Reading machine-specific values from the live config"
 # configuration.nix in the repo is a TEMPLATE (@GRUB_DEVICE@ and friends are
@@ -101,8 +105,8 @@ log "Build succeeded — installing files into /etc/nixos"
 ssh "$HOST" "
   sudo install -m 644 '$STAGE'/configuration.nix /etc/nixos/configuration.nix &&
   sudo rm -rf /etc/nixos/maelle-proxy /etc/nixos/maelle-site &&
-  sudo cp -r '$STAGE'/proxy /etc/nixos/maelle-proxy &&
-  sudo cp -r '$STAGE'/site /etc/nixos/maelle-site &&
+  sudo cp -r '$STAGE'/maelle-proxy /etc/nixos/maelle-proxy &&
+  sudo cp -r '$STAGE'/maelle-site /etc/nixos/maelle-site &&
   sudo chmod -R a+rX /etc/nixos/maelle-proxy /etc/nixos/maelle-site &&
   rm -rf '$STAGE'
 "
