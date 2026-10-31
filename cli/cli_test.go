@@ -246,6 +246,29 @@ func TestCommandsWithoutNetwork(t *testing.T) {
 	if s.cfg.System != "hello" {
 		t.Fatal("system not set")
 	}
+	s.handleCommand("/reasoning high")
+	if s.cfg.Reasoning != "high" {
+		t.Fatal("reasoning not set")
+	}
+	body := s.requestBody()
+	if body["reasoning_effort"] != "high" {
+		t.Fatalf("requestBody missing reasoning_effort: %v", body)
+	}
+	buf.Reset()
+	s.handleCommand("/reasoning ultra")
+	if !strings.Contains(buf.String(), "error") {
+		t.Fatal("bad reasoning level should error")
+	}
+	if s.cfg.Reasoning != "high" {
+		t.Fatal("bad reasoning level should not change the setting")
+	}
+	s.handleCommand("/reasoning off")
+	if s.cfg.Reasoning != "" {
+		t.Fatal("reasoning should be cleared")
+	}
+	if _, ok := s.requestBody()["reasoning_effort"]; ok {
+		t.Fatal("reasoning_effort should be absent when unset")
+	}
 	s.handleCommand("/raw")
 	if !s.rawMarkers {
 		t.Fatal("raw should be on")

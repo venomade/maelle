@@ -123,6 +123,9 @@ func (s *session) printBanner() {
 	if s.cfg.System != "" {
 		t.line(dim(fmt.Sprintf("  system      %d chars (client-side)", len(s.cfg.System))))
 	}
+	if s.cfg.Reasoning != "" {
+		t.line(dim("  reasoning   " + s.cfg.Reasoning))
+	}
 	t.line(dim("  /help for commands · /exit or Ctrl-D to quit · end a line with \\ for multi-line"))
 	t.line("")
 }

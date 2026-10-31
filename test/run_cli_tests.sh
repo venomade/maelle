@@ -142,6 +142,14 @@ check "max-tokens set" "$out" "max_tokens 100"
 check "system set" "$out" "client system prompt set"
 out=$(run tp '/temp banana' /exit)
 check "bad temp errors" "$out" "error"
+out=$(run rs '/reasoning high' /reasoning '/reasoning ultra' '/reasoning off' /exit)
+check "reasoning set" "$out" "reasoning_effort high"
+check "reasoning shown" "$out" "reasoning_effort: high"
+check "bad reasoning errors" "$out" "error"
+check "reasoning off" "$out" "reasoning_effort unset"
+check_not "banner has no reasoning after off" "$(run rs /exit)" "reasoning"
+run rs2 '/reasoning medium' /exit >/dev/null
+check "reasoning persisted across runs" "$(run rs2 /exit)" "reasoning   medium"
 
 echo "== history / undo / retry / save / load =="
 out=$(run hist zebra-uniq-1 /history /exit)

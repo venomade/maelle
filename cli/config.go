@@ -15,6 +15,7 @@ type config struct {
 	Temp      *float64 `json:"temperature,omitempty"`
 	MaxTokens *int     `json:"max_tokens,omitempty"`
 	System    string   `json:"system,omitempty"`
+	Reasoning string   `json:"reasoning_effort,omitempty"`
 }
 
 func defaultConfig() config {
@@ -57,6 +58,9 @@ func loadConfig() config {
 	cfg.MaxTokens = saved.MaxTokens
 	if saved.System != "" {
 		cfg.System = saved.System
+	}
+	if saved.Reasoning != "" {
+		cfg.Reasoning = saved.Reasoning
 	}
 	return cfg
 }

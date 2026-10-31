@@ -15,8 +15,8 @@ import (
 
 var commandNames = []string{
 	"help", "exit", "quit", "reset", "clear", "model", "models", "ping",
-	"stream", "temp", "max-tokens", "system", "tools", "history", "undo",
-	"retry", "save", "load", "compact", "raw", "usage",
+	"stream", "temp", "max-tokens", "system", "reasoning", "tools", "history",
+	"undo", "retry", "save", "load", "compact", "raw", "usage",
 }
 
 func onOff(b bool) string {
@@ -59,6 +59,8 @@ func (s *session) handleCommand(line string) bool {
 		s.cmdMaxTokens(arg)
 	case "system":
 		s.cmdSystem(arg)
+	case "reasoning":
+		s.cmdReasoning(arg)
 	case "tools":
 		s.cmdTools()
 	case "history":
@@ -99,6 +101,7 @@ func (s *session) cmdHelp() {
 		{"/temp <0-2>", "set the sampling temperature"},
 		{"/max-tokens <n>|off", "set max_tokens"},
 		{"/system [text|off]", "set/clear a client-side system prompt"},
+		{"/reasoning [none|low|medium|high|off]", "set reasoning_effort (reasoning models)"},
 		{"/tools", "list the client tools maelle can call on this machine"},
 		{"/history", "print the conversation so far"},
 		{"/undo", "drop the last exchange"},
@@ -233,6 +236,40 @@ func (s *session) cmdSystem(arg string) {
 	s.cfg.System = arg
 	s.cfg.save()
 	s.note(fmt.Sprintf("client system prompt set (%d chars)", len(arg)))
+}
+
+var reasoningLevels = []string{"none", "low", "medium", "high"}
+
+func (s *session) cmdReasoning(arg string) {
+	if arg == "" {
+		if s.cfg.Reasoning != "" {
+			s.note("reasoning_effort: " + s.cfg.Reasoning)
+		} else {
+			s.note("reasoning_effort unset (API default) — one of: " + strings.Join(reasoningLevels, " "))
+		}
+		return
+	}
+	arg = strings.ToLower(arg)
+	if arg == "off" || arg == "clear" {
+		s.cfg.Reasoning = ""
+		s.cfg.save()
+		s.note("reasoning_effort unset")
+		return
+	}
+	ok := false
+	for _, l := range reasoningLevels {
+		if arg == l {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		s.err(fmt.Errorf("reasoning must be one of %s, or 'off'", strings.Join(reasoningLevels, " ")))
+		return
+	}
+	s.cfg.Reasoning = arg
+	s.cfg.save()
+	s.note("reasoning_effort " + arg)
 }
 
 func (s *session) cmdTools() {

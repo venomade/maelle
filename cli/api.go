@@ -108,6 +108,9 @@ func (s *session) requestBody() map[string]any {
 	if s.cfg.MaxTokens != nil {
 		req["max_tokens"] = *s.cfg.MaxTokens
 	}
+	if s.cfg.Reasoning != "" {
+		req["reasoning_effort"] = s.cfg.Reasoning
+	}
 	return req
 }
 
