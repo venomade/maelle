@@ -205,6 +205,18 @@ out=$(printf '/exit\n' | env -i HOME="$TMP/hnocol" PATH="$PATH" MAELLE_COLOR=nev
   MAELLE_PROXY_KEY=dev-secret MAELLE_URL="$BASE" "$TMP/maelle" 2>&1)
 check_not "no ANSI when MAELLE_COLOR=never" "$out" "$(printf '\033')"
 
+echo "== raw-mode editor over a pty (backspace/edit keys regression) =="
+if timeout 90 python3 "$ROOT/test/pty_editor_test.py" "$TMP/maelle" "$BASE" "$TMP/pty-home" \
+     >"$TMP/pty.log" 2>&1; then
+  sed 's/^/      /' "$TMP/pty.log"
+  n=$(grep -c '^PASS' "$TMP/pty.log"); pass=$((pass+n))
+  echo "PASS  pty editor suite ($n checks)"
+else
+  sed 's/^/      /' "$TMP/pty.log"
+  n=$(grep -c '^FAIL' "$TMP/pty.log" || true); fail=$((fail+n+1))
+  echo "FAIL  pty editor suite"
+fi
+
 echo
 echo "passed: $pass, failed: $fail"
 [[ $fail == 0 ]]

@@ -88,6 +88,12 @@ func (e *editor) readLine(prompt string) (string, bool) {
 
 // readRawLine is the raw-mode single-line editor. Returns status 0 (line), 1
 // (eof) or 2 (interrupted).
+//
+// Every input byte must advance the scan index exactly once: the cases below
+// either return, continue with i set past what they consumed, or fall through
+// to the single i++ at the bottom of the loop. (An earlier version forgot that
+// for the edit keys — one backspace then spun on the same byte forever,
+// erasing the whole line and wedging the REPL.)
 func (e *editor) readRawLine(prompt string) (string, int) {
 	var buf []rune
 	cursor := 0
@@ -103,6 +109,7 @@ func (e *editor) readRawLine(prompt string) (string, int) {
 	}
 	redraw()
 	var data [512]byte
+	var pre []byte // escape-sequence / UTF-8 bytes split across reads
 	for {
 		n, err := os.Stdin.Read(data[:])
 		if n == 0 {
@@ -112,6 +119,10 @@ func (e *editor) readRawLine(prompt string) (string, int) {
 			continue
 		}
 		d := data[:n]
+		if len(pre) > 0 {
+			d = append(pre, d...)
+			pre = nil
+		}
 		i := 0
 		for i < len(d) {
 			c := d[i]
@@ -166,14 +177,20 @@ func (e *editor) readRawLine(prompt string) (string, int) {
 				e.t.write("\x1b[2J\x1b[H")
 				redraw()
 			case c == 27: // escape sequence (arrows, home/end, delete)
-				if i+1 < len(d) && (d[i+1] == '[' || d[i+1] == 'O') {
+				if i+1 >= len(d) { // ESC is the last byte of the read: stash, wait for more
+					pre = append([]byte(nil), d[i:]...)
+					i = len(d)
+					continue
+				}
+				if d[i+1] == '[' || d[i+1] == 'O' {
 					j := i + 2
 					start := j
 					for j < len(d) && !(d[j] >= 0x40 && d[j] <= 0x7e) {
 						j++
 					}
-					if j >= len(d) {
-						i = len(d) // incomplete sequence; drop it
+					if j >= len(d) { // sequence split across reads: stash and wait
+						pre = append([]byte(nil), d[i:]...)
+						i = len(d)
 						continue
 					}
 					seq := string(d[start:j])
@@ -222,10 +239,14 @@ func (e *editor) readRawLine(prompt string) (string, int) {
 					}
 					continue
 				}
-				i++ // lone ESC
+				// ESC + other byte (e.g. Alt-x): skip the ESC, handle the next
 			default:
-				if c < 32 {
-					i++
+				if c < 32 { // other control chars: ignore
+					break
+				}
+				if c >= 0x80 && !utf8.FullRune(d[i:]) { // UTF-8 char split across reads
+					pre = append([]byte(nil), d[i:]...)
+					i = len(d)
 					continue
 				}
 				r, size := utf8.DecodeRune(d[i:])
@@ -233,9 +254,11 @@ func (e *editor) readRawLine(prompt string) (string, int) {
 				copy(buf[cursor+1:], buf[cursor:])
 				buf[cursor] = r
 				cursor++
-				i += size
 				redraw()
+				i += size
+				continue
 			}
+			i++
 		}
 	}
 }
