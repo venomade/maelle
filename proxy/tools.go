@@ -56,7 +56,8 @@ var (
 	// backreferences, so the closing-tag alternation repeats the opening.
 	reBlocks = regexp.MustCompile(`(?is)<(?:script|style|nav|header|footer|aside|form|noscript|svg|iframe|template|select)[^>]*>.*?</(?:script|style|nav|header|footer|aside|form|noscript|svg|iframe|template|select)\s*>`)
 	reTags   = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
-	reWiki   = regexp.MustCompile(`\{\{[^{}]{0,2000}\}\}`)
+	// RE2 caps repeat counts at 1000 — {0,2000} panics at init (exit 2).
+	reWiki   = regexp.MustCompile(`\{\{[^{}]{0,1000}\}\}`)
 )
 
 type toolMarker struct {
