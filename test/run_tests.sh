@@ -159,6 +159,8 @@ check "web/ns: visible text kept" "$(has "$C" 'Visible content')" "found"
 check "web/ns: paragraph kept" "$(has "$C" 'real paragraph text')" "found"
 check "web/ns: script stripped" "$(grep -c 'hidden-script' <<<"$C")" "0"
 check "web/ns: tags stripped" "$(grep -c '<h1>' <<<"$C")" "0"
+check "web/ns: nav/header/aside chrome stripped" "$(grep -c 'chrome' <<<"$C")" "0"
+check "web/ns: wiki template junk stripped" "$(grep -c 'junk-template' <<<"$C")" "0"
 
 chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"webfetch404"}]}'
 C=$(jq -r '.choices[0].message.content' <<<"$body")

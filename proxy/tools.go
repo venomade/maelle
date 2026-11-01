@@ -45,12 +45,18 @@ var toolSudo = os.Getenv("MAELLE_TOOL_SUDO") != "0"
 var searxngURL = getenv("MAELLE_SEARXNG_URL", "http://127.0.0.1:8888")
 
 var (
-	// crude HTML -> text: drop script/style blocks and comments, strip
-	// tags, unescape entities. All whitespace collapses to single spaces,
-	// so the result is one paragraph — fine for the model, bad for
-	// layout-sensitive pages.
-	reScriptStyle = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)\s*>`)
-	reTags        = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
+	// crude HTML -> text, tuned by fetching real pages (Wikipedia, news
+	// sites): 1. drop chrome blocks (script/style/nav/header/footer/aside/
+	// form/noscript/svg/iframe/template/select) wholesale; 2. start the
+	// text at the first <h1> — on article pages everything before it is
+	// site chrome (menus, search boxes, language lists), which used to eat
+	// the whole output cap before the article began; 3. strip comments and
+	// tags, unescape entities, drop wiki-style {{template}} markup (leaks
+	// from Parsoid round-trip data), collapse all whitespace. RE2 has no
+	// backreferences, so the closing-tag alternation repeats the opening.
+	reBlocks = regexp.MustCompile(`(?is)<(?:script|style|nav|header|footer|aside|form|noscript|svg|iframe|template|select)[^>]*>.*?</(?:script|style|nav|header|footer|aside|form|noscript|svg|iframe|template|select)\s*>`)
+	reTags   = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
+	reWiki   = regexp.MustCompile(`\{\{[^{}]{0,2000}\}\}`)
 )
 
 type toolMarker struct {
@@ -233,8 +239,12 @@ func toolWebFetch(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	hr.Header.Set("User-Agent", "Mozilla/5.0 (compatible; maelle-proxy/1.0)")
+	// a real browser UA: sites serve layouted HTML to it and soft-block
+	// obvious bot UAs with 403s.
+	hr.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	hr.Header.Set("Accept", "text/html, text/plain, */*")
+	hr.Header.Set("Accept-Language", "en")
 	ctx, cancel := context.WithTimeout(context.Background(), webFetchTimeout)
 	defer cancel()
 	hr = hr.WithContext(ctx)
@@ -264,9 +274,13 @@ func toolWebFetch(a map[string]any) (string, error) {
 }
 
 func htmlToText(s string) string {
-	s = reScriptStyle.ReplaceAllString(s, " ")
+	s = reBlocks.ReplaceAllString(s, " ")
+	if i := strings.Index(strings.ToLower(s), "<h1"); i > 0 {
+		s = s[i:]
+	}
 	s = reTags.ReplaceAllString(s, " ")
 	s = html.UnescapeString(s)
+	s = reWiki.ReplaceAllString(s, " ")
 	return strings.Join(strings.Fields(s), " ")
 }
 

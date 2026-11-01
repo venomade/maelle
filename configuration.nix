@@ -10,6 +10,10 @@ let
       mv $out/bin/proxy $out/bin/maelle-proxy
     '';
   };
+  nixpkgs-unstable = import (builtins.fetchTarball {
+    url = "https://github.com/NixOS/nixpkgs/archive/d357a2b54f0b6dc4aeb4e993190a52cf151b6f24.tar.gz";
+    sha256 = "1mqszzvb5sizl79lgkz7r44mpaxw14l1i37kcls5yd7m9qwg86af";
+  }) { };
 in
 {
   imports = [ ./hardware-configuration.nix ];
@@ -106,6 +110,7 @@ in
 
   services.searx = {
     enable = true;
+    package = nixpkgs-unstable.searxng;
     environmentFile = "/etc/maelle-searx.env";
     settings = {
       use_default_settings = true;

@@ -129,9 +129,13 @@ class Handler(BaseHTTPRequestHandler):
             body = (b"<!doctype html><html><head><title>Test Page</title>"
                     b"<script>var hidden-script = 1;</script>"
                     b"<style>.hidden-style { color: red }</style></head>"
+                    b'<header><a href="#">site-chrome header-junk</a></header>'
+                    b"<nav><ul><li>nav-chrome junk-link</li></ul></nav>"
+                    b"<aside>sidebar-chrome junk-aside</aside>"
                     b"<body><!-- a comment -->"
                     b"<h1>Visible content</h1>"
                     b"<p>This is the real paragraph text.</p>"
+                    b"<p>{{Multiple image|caption=junk-template|width=100}}</p>"
                     b"</body></html>")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
