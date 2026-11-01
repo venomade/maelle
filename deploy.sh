@@ -11,7 +11,8 @@
 #      never overwriting it with raw @PLACEHOLDER@s
 #   2. on first run (or while /etc/maelle.env still holds the install
 #      placeholder): asks for MISTRAL_API_KEY + MAELLE_PROXY_KEY and
-#      installs them root-only (never in this repo)
+#      installs them root-only (never in this repo); generates the
+#      SearXNG secret (/etc/maelle-searx.env) the same way
 #   3. nixos-rebuild switch FROM THE STAGING DIR — /etc/nixos only adopts
 #      the new files after the build has succeeded, so a failed build
 #      leaves the previous configuration fully intact
@@ -44,6 +45,9 @@ fi
 
 log "Uploading files to $HOST"
 ssh "$HOST" "rm -rf '$STAGE' && mkdir -p '$STAGE'"
+# configuration.nix builds from ./maelle-proxy and serves ./maelle-site —
+# the server-side names install.sh also uses — but the repo dirs carry the
+# short names, so rename them in the staging dir right after extraction.
 tar czf - -C "$REPO_ROOT" proxy site | ssh "$HOST" "
   tar xzf - -C '$STAGE' &&
   mv '$STAGE'/proxy '$STAGE'/maelle-proxy &&
@@ -94,6 +98,16 @@ if ! ssh "$HOST" "sudo grep -q '^MAELLE_PROXY_KEY=' /etc/maelle.env && ! sudo gr
 MISTRAL_API_KEY=$MISTRAL_API_KEY
 MAELLE_PROXY_KEY=$MAELLE_PROXY_KEY
 EOF
+fi
+
+log "Checking SearXNG secret (/etc/maelle-searx.env)"
+# The searx service envsubst's its secret key from this file. Generate
+# once, keep forever — the value only survives for cookie signing across
+# restarts, but changing secrets for no reason is still bad hygiene.
+if ! ssh "$HOST" "sudo test -s /etc/maelle-searx.env"; then
+  log "Generating /etc/maelle-searx.env"
+  printf 'SEARX_SECRET_KEY=%s\n' "$(head -c32 /dev/urandom | base64)" \
+    | ssh "$HOST" 'sudo sh -c "umask 077 && cat > /etc/maelle-searx.env"'
 fi
 
 log "nixos-rebuild switch on $HOST from the staging dir (first run builds the Go proxy — takes a while)"

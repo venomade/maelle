@@ -4,13 +4,17 @@
 # Terminal 1:  python3 test/mock_upstream.py
 # Terminal 2:  cd proxy && MAELLE_UPSTREAM=http://127.0.0.1:9901 \
 #                MISTRAL_API_KEY=mock-mistral-key MAELLE_PROXY_KEY=dev-secret \
-#                MAELLE_TOOL_SUDO=0 go run .
+#                MAELLE_TOOL_SUDO=0 MAELLE_SEARXNG_URL=http://127.0.0.1:9901 \
+#                go run .
 # Then:        test/run_tests.sh
 #
 # Scenario keywords (mock): serverfile / double / mixedwork / runcmd /
-# clientonly. When history ends in tool messages, the mock reports exactly
-# what results it received (RESULTS {...}) — machine-checkable proof that
-# the proxy executed, relayed and reconstructed everything correctly.
+# websearch / webfetch / webfetch404 / clientonly. The mock also serves the
+# fake SearXNG JSON endpoint (/search) and test page (/page), so the web
+# tools need no extra processes. When history ends in tool messages, the
+# mock reports exactly what results it received (RESULTS {...}) —
+# machine-checkable proof that the proxy executed, relayed and
+# reconstructed everything correctly.
 set -u
 BASE="${BASE:-http://localhost:8080}"
 KEY="${KEY:-dev-secret}"
@@ -82,7 +86,7 @@ check "chat: object" "$(jq -r .object <<<"$body")" "chat.completion"
 check "chat: finish_reason" "$(jq -r '.choices[0].finish_reason' <<<"$body")" "stop"
 check "chat: has usage" "$(jq '.usage | has("total_tokens")' <<<"$body")" "true"
 check "chat: persona injected" "$(jq -r '.choices[0].message.content' <<<"$body" | grep -c 'SYSTEM\[You are Maelle, the ag')" "1"
-check "chat: maelle tools merged" "$(jq -r '.choices[0].message.content' <<<"$body" | grep -c 'TOOLS\[maelle_read_file,maelle_list_dir,maelle_run_command\]')" "1"
+check "chat: maelle tools merged" "$(jq -r '.choices[0].message.content' <<<"$body" | grep -c 'TOOLS\[maelle_read_file,maelle_list_dir,maelle_run_command,maelle_web_search,maelle_web_fetch\]')" "1"
 
 hdr=$(curl -s -D - -o /dev/null "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
@@ -139,14 +143,47 @@ chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content
 check "cmd/ns: exit 0" "$(has "$body" 'exit=0')" "found"
 check "cmd/ns: command output" "$(has "$body" 'hello-from-maelle')" "found"
 
-# ---------- 5. client tool calls pass through untouched ----------
+# ---------- 5. web tools: search + fetch via the mock's SearXNG endpoint ----------
+
+chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"websearch"}]}'
+C=$(jq -r '.choices[0].message.content' <<<"$body")
+check "web/ns: search status" "$code" "200"
+check "web/ns: search marker" "$(has "$C" '"name":"maelle_web_search"')" "found"
+check "web/ns: searx results returned" "$(has "$C" 'example.com/maelle')" "found"
+check "web/ns: search narrated" "$(has "$C" 'RESULTS.*example.com/maelle')" "found"
+
+chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"webfetch"}]}'
+C=$(jq -r '.choices[0].message.content' <<<"$body")
+check "web/ns: fetch marker" "$(has "$C" '"name":"maelle_web_fetch"')" "found"
+check "web/ns: visible text kept" "$(has "$C" 'Visible content')" "found"
+check "web/ns: paragraph kept" "$(has "$C" 'real paragraph text')" "found"
+check "web/ns: script stripped" "$(grep -c 'hidden-script' <<<"$C")" "0"
+check "web/ns: tags stripped" "$(grep -c '<h1>' <<<"$C")" "0"
+
+chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"webfetch404"}]}'
+C=$(jq -r '.choices[0].message.content' <<<"$body")
+check "web/ns: fetch 404 reported as error" "$(has "$C" '"status":"error"')" "found"
+check "web/ns: fetch 404 status code in result" "$(has "$C" 'status 404')" "found"
+
+chat_stream "$KEY" '{"model":"mistral-small-latest","stream":true,"messages":[{"role":"user","content":"websearch"}]}'
+content=$(stream_content)
+check "web/st: search marker streamed" "$(echo "$content" | grep -c '"name":"maelle_web_search"')" "1"
+check "web/st: search narrated" "$(echo "$content" | grep -c 'RESULTS.*example.com/maelle')" "1"
+check "web/st: finish stop" "$(stream_finish)" "stop"
+
+chat_stream "$KEY" '{"model":"mistral-small-latest","stream":true,"messages":[{"role":"user","content":"webfetch"}]}'
+content=$(stream_content)
+check "web/st: fetch marker streamed" "$(echo "$content" | grep -c '"name":"maelle_web_fetch"')" "1"
+check "web/st: fetched text streamed" "$(has "$content" 'Visible content')" "found"
+
+# ---------- 6. client tool calls pass through untouched ----------
 
 chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"clientonly"}]}'
 check "cli/ns: tool_calls relayed" "$(jq -r '.choices[0].message.tool_calls[0].function.name' <<<"$body")" "client_get_time"
 check "cli/ns: finish_reason tool_calls" "$(jq -r '.choices[0].finish_reason' <<<"$body")" "tool_calls"
 check "cli/ns: no markers" "$(jq -r '.choices[0].message.content' <<<"$body" | grep -c 'maelle:tool ')" "0"
 
-# ---------- 6. mixed batch: execute + relay + round-trip ----------
+# ---------- 7. mixed batch: execute + relay + round-trip ----------
 
 chat "$KEY" '{"model":"mistral-small-latest","messages":[{"role":"user","content":"mixedwork"}]}'
 check "mix/ns: marker for maelle part" "$(jq -r '.choices[0].message.content' <<<"$body" | grep -c '"name":"maelle_read_file"')" "1"

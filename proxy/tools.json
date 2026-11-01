@@ -41,5 +41,34 @@
         "required": ["command"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "maelle_web_search",
+      "description": "Search the public web from Maelle's server via SearXNG. Returns results as title, URL and snippet. Use this when the answer depends on fresh or external facts instead of guessing.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "The search query" },
+          "max_results": { "type": "number", "description": "Optional maximum number of results, 1-20 (default 8)" }
+        },
+        "required": ["query"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "maelle_web_fetch",
+      "description": "Fetch an http(s) URL from Maelle's server and return its text. HTML pages are stripped down to readable text. JavaScript-rendered pages won't show their dynamic content.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "The absolute http(s) URL to fetch" }
+        },
+        "required": ["url"]
+      }
+    }
   }
 ]

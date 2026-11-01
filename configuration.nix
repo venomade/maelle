@@ -84,7 +84,7 @@ in
   # Maelle Proxy
   systemd.services.maelle-proxy = {
     description = "Maelle — OpenAI-compatible proxy with server-side tools";
-    after = [ "network-online.target" ];
+    after = [ "network-online.target" "searx.service" ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
     path = [ "/run/wrappers" "/run/current-system/sw" ];
@@ -92,6 +92,7 @@ in
       MAELLE_LISTEN = "127.0.0.1:8080";
       MAELLE_PERSONA = "/etc/nixos/maelle-proxy/persona.md";
       MAELLE_TOOLS = "/etc/nixos/maelle-proxy/tools.json";
+      MAELLE_SEARXNG_URL = "http://127.0.0.1:8888";
     };
     serviceConfig = {
       ExecStart = "${maelleProxy}/bin/maelle-proxy";
@@ -100,6 +101,20 @@ in
       EnvironmentFile = "/etc/maelle.env";
       Restart = "always";
       RestartSec = "3s";
+    };
+  };
+
+  services.searx = {
+    enable = true;
+    environmentFile = "/etc/maelle-searx.env";
+    settings = {
+      use_default_settings = true;
+      server = {
+        bind_address = "127.0.0.1";
+        port = 8888;
+        secret_key = "$SEARX_SECRET_KEY";
+      };
+      search.formats = [ "html" "json" ];
     };
   };
 

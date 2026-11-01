@@ -10,8 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -24,12 +29,29 @@ const (
 	dirCap       = 512
 	cmdOutCap    = 64 * 1024
 	cmdTimeout   = 60
+
+	webSearchCap    = 16 * 1024
+	webFetchCap     = 32 * 1024
+	webFetchBodyMax = 512 * 1024
+	webFetchTimeout = 30 * time.Second
 )
 
 // Full server access: commands run via passwordless sudo (the NixOS config
 // gives the maelle user passwordless wheel). Set MAELLE_TOOL_SUDO=0 for
 // local testing without sudo.
 var toolSudo = os.Getenv("MAELLE_TOOL_SUDO") != "0"
+
+// SearXNG (the NixOS module) serves JSON on the loopback interface.
+var searxngURL = getenv("MAELLE_SEARXNG_URL", "http://127.0.0.1:8888")
+
+var (
+	// crude HTML -> text: drop script/style blocks and comments, strip
+	// tags, unescape entities. All whitespace collapses to single spaces,
+	// so the result is one paragraph — fine for the model, bad for
+	// layout-sensitive pages.
+	reScriptStyle = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)\s*>`)
+	reTags        = regexp.MustCompile(`(?s)<!--.*?-->|<[^>]*>`)
+)
 
 type toolMarker struct {
 	ID        string `json:"id"`
@@ -45,6 +67,8 @@ var toolImpls = map[string]toolFunc{
 	"maelle_read_file":   toolReadFile,
 	"maelle_list_dir":    toolListDir,
 	"maelle_run_command": toolRunCommand,
+	"maelle_web_search":  toolWebSearch,
+	"maelle_web_fetch":   toolWebFetch,
 }
 
 // executeTool runs one maelle_* call. Errors are tool *results* (status
@@ -136,6 +160,114 @@ func toolRunCommand(a map[string]any) (string, error) {
 		s = s[:cmdOutCap] + fmt.Sprintf("\n…[truncated, more than %d bytes]", cmdOutCap)
 	}
 	return fmt.Sprintf("exit=%d\n%s", exit, s), nil
+}
+
+// toolWebSearch queries the local SearXNG instance (JSON API) and formats
+// the results as title / url / snippet blocks. SearXNG needs format=json
+// enabled in its settings — the NixOS config does that.
+func toolWebSearch(a map[string]any) (string, error) {
+	query, _ := a["query"].(string)
+	maxResults := 8
+	if v, ok := a["max_results"].(float64); ok && v >= 1 {
+		maxResults = int(v)
+	}
+	if maxResults < 1 {
+		maxResults = 1
+	}
+	if maxResults > 20 {
+		maxResults = 20
+	}
+	u := searxngURL + "/search?q=" + url.QueryEscape(query) + "&format=json"
+	hr, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), webFetchTimeout)
+	defer cancel()
+	hr = hr.WithContext(ctx)
+	resp, err := httpClient.Do(hr)
+	if err != nil {
+		return "", fmt.Errorf("searxng unreachable: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("searxng returned status %d", resp.StatusCode)
+	}
+	var data struct {
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Content string `json:"content"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", fmt.Errorf("searxng returned invalid JSON: %v", err)
+	}
+	if len(data.Results) == 0 {
+		return "no results for: " + query, nil
+	}
+	if len(data.Results) > maxResults {
+		data.Results = data.Results[:maxResults]
+	}
+	blocks := make([]string, 0, len(data.Results))
+	for _, r := range data.Results {
+		blocks = append(blocks, r.Title+"\n"+r.URL+"\n"+r.Content)
+	}
+	out := strings.Join(blocks, "\n\n")
+	if len(out) > webSearchCap {
+		out = out[:webSearchCap] +
+			fmt.Sprintf("\n…[truncated, more than %d bytes]", webSearchCap)
+	}
+	return out, nil
+}
+
+// toolWebFetch GETs a page and returns readable text. JS-rendered pages
+// stay empty and nobody checks robots.txt — acceptable for a personal
+// agent, documented as such.
+func toolWebFetch(a map[string]any) (string, error) {
+	target, _ := a["url"].(string)
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		return "", fmt.Errorf("url must start with http:// or https://")
+	}
+	hr, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return "", err
+	}
+	hr.Header.Set("User-Agent", "Mozilla/5.0 (compatible; maelle-proxy/1.0)")
+	hr.Header.Set("Accept", "text/html, text/plain, */*")
+	ctx, cancel := context.WithTimeout(context.Background(), webFetchTimeout)
+	defer cancel()
+	hr = hr.WithContext(ctx)
+	resp, err := httpClient.Do(hr)
+	if err != nil {
+		return "", fmt.Errorf("fetch %s: %v", target, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch %s: status %d", target, resp.StatusCode)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, webFetchBodyMax+1))
+	if len(body) > webFetchBodyMax {
+		body = body[:webFetchBodyMax]
+	}
+	text := string(body)
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "html") {
+		text = htmlToText(text)
+	} else {
+		text = strings.Join(strings.Fields(text), " ")
+	}
+	if len(text) > webFetchCap {
+		text = text[:webFetchCap] +
+			fmt.Sprintf(" …[truncated, more than %d chars]", webFetchCap)
+	}
+	return text, nil
+}
+
+func htmlToText(s string) string {
+	s = reScriptStyle.ReplaceAllString(s, " ")
+	s = reTags.ReplaceAllString(s, " ")
+	s = html.UnescapeString(s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // encodeMarker renders one executed call as a single-line content marker:

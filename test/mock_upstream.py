@@ -8,6 +8,9 @@ proxy's interception loop:
   double      -> two maelle calls in one batch (parallel tool calls)
   mixedwork   -> one maelle call + one client call in the same batch
   runcmd      -> one maelle_run_command call
+  websearch   -> one maelle_web_search call (served by /search below)
+  webfetch    -> one maelle_web_fetch call (served by /page below)
+  webfetch404 -> one maelle_web_fetch call to a 404 URL
   clientonly  -> one client tool call (passthrough)
   (default)   -> echoes system prompt head + tool names (v1 assertions)
 
@@ -17,6 +20,7 @@ proof that the proxy executed / relayed / reconstructed everything.
 """
 import json
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 KEY = "mock-mistral-key"
@@ -61,6 +65,17 @@ def decide(msgs):
         return "Running the command now.", [
             fn_call("call_c1", "maelle_run_command",
                     {"command": "echo hello-from-maelle"})]
+    if "webfetch404" in user:
+        return "Fetching that page.", [
+            fn_call("call_w4", "maelle_web_fetch",
+                    {"url": "http://127.0.0.1:9901/missing"})]
+    if "webfetch" in user:
+        return "Fetching the page now.", [
+            fn_call("call_wf", "maelle_web_fetch",
+                    {"url": "http://127.0.0.1:9901/page"})]
+    if "websearch" in user:
+        return "Searching the web for that.", [
+            fn_call("call_ws", "maelle_web_search", {"query": "maelle agent"})]
     if "clientonly" in user:
         return "What time is it on your machine?", [
             fn_call("call_co", "client_get_time", {})]
@@ -95,6 +110,36 @@ class Handler(BaseHTTPRequestHandler):
                 {"id": "mistral-small-latest", "object": "model",
                  "created": 1700000000, "owned_by": "mistral"},
             ]})
+        elif self.path.startswith("/search"):
+            # fake SearXNG JSON endpoint (MAELLE_SEARXNG_URL points here)
+            q = urllib.parse.parse_qs(self.path.split("?", 1)[1]).get("q", [""])[0] \
+                if "?" in self.path else ""
+            self.send_json(200, {"query": q, "results": [
+                {"title": "Maelle — the agent",
+                 "url": "https://example.com/maelle",
+                 "content": "Maelle is an agent that lives on Stefan's server."},
+                {"title": "Maelle docs",
+                 "url": "https://example.com/docs",
+                 "content": "Maelle docs page with details."},
+                {"title": "Agents overview",
+                 "url": "https://example.org/agents",
+                 "content": "An overview of agent architectures."},
+            ]})
+        elif self.path == "/page":
+            body = (b"<!doctype html><html><head><title>Test Page</title>"
+                    b"<script>var hidden-script = 1;</script>"
+                    b"<style>.hidden-style { color: red }</style></head>"
+                    b"<body><!-- a comment -->"
+                    b"<h1>Visible content</h1>"
+                    b"<p>This is the real paragraph text.</p>"
+                    b"</body></html>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/missing":
+            self.send_json(404, error_body("Not Found"))
         else:
             self.send_json(404, error_body(f"Invalid URL (GET {self.path})"))
 
